@@ -73,6 +73,36 @@ function hash(n) {
   return x - Math.floor(x);
 }
 
+// انفجار خفيف من النقاط (عند الدمج والمكافآت)
+function burst(scene, x, y, color) {
+  for (let i = 0; i < 10; i++) {
+    const a = (i / 10) * Math.PI * 2 + hash(i) * 0.5;
+    const p = scene.add.circle(x, y, 3 + hash(i + 7) * 4, color).setDepth(40);
+    scene.tweens.add({
+      targets: p,
+      x: x + Math.cos(a) * (30 + hash(i + 3) * 25),
+      y: y + Math.sin(a) * (30 + hash(i + 5) * 25),
+      alpha: 0,
+      scale: 0.2,
+      duration: 500,
+      ease: 'Cubic.Out',
+      onComplete: () => p.destroy(),
+    });
+  }
+}
+
+// نص يطلع لفوق ويختفي (مثل +10 ذهب)
+function floatText(scene, x, y, text, color) {
+  const t = scene.add.text(x, y, text, {
+    fontFamily: FONT, fontSize: '24px', fontStyle: 'bold', color,
+    stroke: '#ffffff', strokeThickness: 4,
+  }).setOrigin(0.5).setDepth(50);
+  scene.tweens.add({
+    targets: t, y: y - 50, alpha: 0, duration: 900, ease: 'Cubic.Out',
+    onComplete: () => t.destroy(),
+  });
+}
+
 function makeButton(scene, x, y, w, h, label, onClick, active = false) {
   const g = scene.add.graphics().setDepth(30);
   const draw = (color) => {
@@ -279,7 +309,10 @@ class KingdomScene extends Phaser.Scene {
     this.renderVillage();
     this.updateHUD();
     this.updateChestButton();
-    if (msg) this.say(msg);
+    if (msg) {
+      this.say(msg);
+      this.cameras.main.shake(350, 0.008);
+    }
 
     // فحص الغزوات كل ٣٠ ثانية والعداد
     this.time.addEvent({
@@ -288,7 +321,10 @@ class KingdomScene extends Phaser.Scene {
       callback: () => {
         const m = tickRaids(Date.now());
         this.renderVillage();
-        if (m) this.say(m);
+        if (m) {
+          this.say(m);
+          this.cameras.main.shake(350, 0.008);
+        }
       },
     });
   }
@@ -446,18 +482,19 @@ class KingdomScene extends Phaser.Scene {
 
   // ---------- الأشياء على الشبكة ----------
 
-  renderItems(popCell = null) {
+  // pop: { r, c, type: 'drop' | 'merge' } لتحديد الحركة للخلية الجديدة
+  renderItems(pop = null) {
     this.itemObjs.forEach((o) => o.destroy());
     this.itemObjs = [];
     for (let r = 0; r < ROWS; r++) {
       for (let c = 0; c < COLS; c++) {
         const level = state.grid[r][c];
-        if (level > 0) this.itemObjs.push(this.makeItem(r, c, level, popCell));
+        if (level > 0) this.itemObjs.push(this.makeItem(r, c, level, pop));
       }
     }
   }
 
-  makeItem(r, c, level, popCell) {
+  makeItem(r, c, level, pop) {
     const g = this.add.graphics({ x: cellX(c), y: cellY(r) }).setDepth(5);
     DRAWERS[level](g);
     g.setInteractive(
@@ -467,11 +504,33 @@ class KingdomScene extends Phaser.Scene {
     this.input.setDraggable(g);
     g.cell = { r, c };
     g.level = level;
-    if (popCell && popCell.r === r && popCell.c === c) {
-      g.setScale(0.5);
-      this.tweens.add({ targets: g, scale: 1, duration: 260, ease: 'Back.Out' });
+    if (pop && pop.r === r && pop.c === c) {
+      if (pop.type === 'drop') {
+        g.y -= 90;
+        g.alpha = 0;
+        this.tweens.add({ targets: g, y: cellY(r), alpha: 1, duration: 420, ease: 'Bounce.Out' });
+      } else {
+        g.setScale(0.4);
+        this.tweens.add({ targets: g, scale: 1, duration: 300, ease: 'Back.Out' });
+      }
     }
     return g;
+  }
+
+  // حركة ناعمة للشيء لحد الخلية الهدف، وبعدين ينفذ الإجراء
+  animateTo(obj, cell, onDone) {
+    this.busy = true;
+    this.tweens.add({
+      targets: obj,
+      x: cellX(cell.c),
+      y: cellY(cell.r),
+      duration: 160,
+      ease: 'Cubic.Out',
+      onComplete: () => {
+        this.busy = false;
+        onDone();
+      },
+    });
   }
 
   snapBack(obj, from) {
@@ -480,8 +539,8 @@ class KingdomScene extends Phaser.Scene {
       targets: obj,
       x: cellX(from.c),
       y: cellY(from.r),
-      duration: 120,
-      ease: 'Quad.Out',
+      duration: 260,
+      ease: 'Back.Out',
     });
   }
 
@@ -501,6 +560,8 @@ class KingdomScene extends Phaser.Scene {
             state.defended++;
             state.raid = null;
             this.say('صدّيت الغزوة! +80 ذهب');
+            floatText(this, W / 2, VILLAGE_Y + 14, '+80', '#c98a10');
+            burst(this, W / 2, VILLAGE_Y + VILLAGE_H / 2, 0xa3342a);
             saveState();
             this.renderItems();
             this.renderVillage();
@@ -527,6 +588,8 @@ class KingdomScene extends Phaser.Scene {
           state.completed++;
           state.orders[idx] = makeOrder(state.completed);
           this.say(`اكتمل الطلب! +${reward} ذهب`);
+          floatText(this, cardRect(idx).x + CARD_W / 2, VILLAGE_Y + 14, `+${reward}`, '#c98a10');
+          burst(this, cardRect(idx).x + CARD_W / 2, VILLAGE_Y + VILLAGE_H / 2, 0xe0a526);
           saveState();
           this.renderItems();
           this.renderVillage(idx);
@@ -569,9 +632,12 @@ class KingdomScene extends Phaser.Scene {
 
     if (moved || merged) {
       if (merged) this.say(`طلع ${LEVELS[level + 1].name}!`);
-      saveState();
-      this.renderItems(merged && to ? to : null);
-      this.updateHUD();
+      this.animateTo(obj, to, () => {
+        saveState();
+        this.renderItems(merged ? { r: to.r, c: to.c, type: 'merge' } : null);
+        if (merged) burst(this, cellX(to.c), cellY(to.r), 0xf7e7b4);
+        this.updateHUD();
+      });
     } else {
       this.snapBack(obj, from);
     }
@@ -591,7 +657,7 @@ class KingdomScene extends Phaser.Scene {
     const pick = Phaser.Utils.Array.GetRandom(empty);
     state.grid[pick.r][pick.c] = 1;
     saveState();
-    this.renderItems(pick);
+    this.renderItems({ r: pick.r, c: pick.c, type: 'drop' });
     this.updateHUD();
   }
 
@@ -611,6 +677,7 @@ class KingdomScene extends Phaser.Scene {
     this.updateHUD();
     this.updateChestButton();
     this.say(`صندوق اليوم: +${reward} ذهب، سلسلة ${state.streak} يوم`);
+    floatText(this, 300, 700, `+${reward}`, '#c98a10');
   }
 }
 
@@ -684,6 +751,12 @@ class CastleScene extends Phaser.Scene {
     const c = state.castle;
     const g = this.add.graphics().setDepth(5);
     this.castleObjs.push(g);
+    if (this.justBuilt) {
+      this.justBuilt = false;
+      g.setAlpha(0);
+      g.y = -18;
+      this.tweens.add({ targets: g, alpha: 1, y: 0, duration: 450, ease: 'Back.Out' });
+    }
 
     // الأساس (حجارة)
     if (c.foundation) {
@@ -820,6 +893,7 @@ class CastleScene extends Phaser.Scene {
     state.castle[part.key] = true;
     if (part.key === 'walls') state.lastRaid = Date.now(); // أول غزوة بعد ٤ ساعات من بناء الأسوار
     saveState();
+    this.justBuilt = true;
     this.renderCastle();
     this.renderPanels();
     this.updateHUD();
