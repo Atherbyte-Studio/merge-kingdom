@@ -1,22 +1,29 @@
-// مملكة الدمج - المرحلة 1: أرض، أشكال خشب طبيعية، سحب وإفلات مريح، دمج، وحفظ محلي
+// مملكة الدمج - المرحلة 2: طلبات القرية، صندوق اليوم مع سلسلة، ذهب، وحفظ محلي
 
 const W = 600;
-const H = 720;
+const H = 800;
 const COLS = 6;
 const ROWS = 6;
 const SIZE = 80;          // حجم الخلية
 const GAP = 8;            // المسافة بين الخلايا
 const STEP = SIZE + GAP;
 const GRID_X = 40;
-const GRID_Y = 160;
+const GRID_Y = 172;
 const MAX_LEVEL = 3;
 const SAVE_KEY = 'merge-kingdom-save-v1';
 const FONT = 'system-ui, Tahoma, sans-serif';
 
+// قرية الطلبات
+const VILLAGE_Y = 96;
+const VILLAGE_H = 64;
+const CARD_W = 180;
+const CARD_GAP = 10;
+const CARD_X0 = (W - (3 * CARD_W + 2 * CARD_GAP)) / 2;
+
 const LEVELS = {
-  1: { name: 'حطب' },
-  2: { name: 'خشب' },
-  3: { name: 'لوح' },
+  1: { name: 'حطب', reward: 10 },
+  2: { name: 'خشب', reward: 25 },
+  3: { name: 'لوح', reward: 60 },
 };
 
 function cellX(c) { return GRID_X + c * STEP + SIZE / 2; }
@@ -28,6 +35,25 @@ function nearestCell(x, y) {
   const r = Math.round((y - cellY(0)) / STEP);
   if (c < 0 || c >= COLS || r < 0 || r >= ROWS) return null;
   return { r, c };
+}
+
+function cardRect(i) {
+  return { x: CARD_X0 + i * (CARD_W + CARD_GAP), y: VILLAGE_Y, w: CARD_W, h: VILLAGE_H };
+}
+
+// يرجّع رقم البطاقة اللي فيها النقطة (مع هامش بسيط)، أو -1
+function cardAt(x, y) {
+  for (let i = 0; i < 3; i++) {
+    const r = cardRect(i);
+    if (x >= r.x - 10 && x <= r.x + r.w + 10 && y >= r.y - 10 && y <= r.y + r.h + 10) return i;
+  }
+  return -1;
+}
+
+// تاريخ اليوم بالتوقيت المحلي بصيغة YYYY-MM-DD
+function dayKey(date) {
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
 }
 
 // عشوائية ثابتة حسب رقم (عشان الأرض ما تتغيّر مع كل تحديث)
@@ -52,11 +78,9 @@ function drawLog(g) {
     g.fillRoundedRect(x, y, w, h, 9);
     g.fillStyle(0x9a6230, 1);
     g.fillRoundedRect(x + 2, y + 2, w - 4, h - 7, 7);
-    // لحاء وخطوط لحاء
     g.lineStyle(1, 0x4a2c12, 0.55);
     g.lineBetween(x + 12, y + 4, x + 24, y + 4);
     g.lineBetween(x + 30, y + 13, x + 48, y + 13);
-    // الوجه الدائري للجذع (حلقات السنين)
     const cx = x + 4;
     const cy = y + h / 2;
     g.fillStyle(0xe2b07a, 1);
@@ -82,11 +106,9 @@ function drawPlanks(g) {
     g.fillRoundedRect(-33, y, 66, 15, 4);
     g.fillStyle(color, 1);
     g.fillRoundedRect(-32, y + 1, 64, 13, 3);
-    // عروق الخشب
     g.lineStyle(1, 0x7a4a22, 0.45);
     g.lineBetween(-26, y + 5, 18, y + 4);
     g.lineBetween(-10, y + 10, 26, y + 9);
-    // مسامير
     g.fillStyle(0x3d2e22, 1);
     g.fillCircle(-24, y + 7, 2);
     g.fillCircle(24, y + 7, 2);
@@ -97,19 +119,15 @@ function drawBoard(g) {
   g.fillStyle(0x000000, 0.18);
   g.fillEllipse(0, 30, 74, 12);
 
-  // اللوح نفسه
   g.fillStyle(0x7a4a22, 1);
   g.fillRoundedRect(-36, -28, 72, 56, 6);
   g.fillStyle(0xf1c27d, 1);
   g.fillRoundedRect(-34, -26, 68, 52, 5);
-  // لمعة فوق
   g.fillStyle(0xffffff, 0.22);
   g.fillRoundedRect(-30, -22, 60, 10, 4);
-  // عروق عرضية
   g.lineStyle(1, 0xb9833e, 0.5);
   [-10, 0, 10, 18].forEach((y) => g.lineBetween(-28, y, 26, y + 1));
   g.lineBetween(-10, -20, 20, -18);
-  // مسامير بالزوايا
   g.fillStyle(0x3d2e22, 1);
   [[-26, -20], [26, -20], [-26, 20], [26, 20]].forEach(([x, y]) => g.fillCircle(x, y, 2.5));
 }
@@ -124,10 +142,9 @@ class MainScene extends Phaser.Scene {
   }
 
   create() {
-    this.grid = [];
-    this.merges = 0;
-    this.itemObjs = [];
     this.input.topOnly = true;
+    this.itemObjs = [];
+    this.villageObjs = [];
     this.loadGame();
 
     this.drawGround();
@@ -147,7 +164,9 @@ class MainScene extends Phaser.Scene {
     this.input.on('dragend', (pointer, obj) => this.onDrop(obj));
 
     this.renderItems();
+    this.renderVillage();
     this.updateHUD();
+    this.updateChestButton();
   }
 
   // ---------- الحفظ والتحميل ----------
@@ -155,14 +174,21 @@ class MainScene extends Phaser.Scene {
   loadGame() {
     try {
       const saved = JSON.parse(localStorage.getItem(SAVE_KEY));
-      const valid =
+      const validGrid =
         saved &&
         Array.isArray(saved.grid) &&
         saved.grid.length === ROWS &&
         saved.grid.every((row) => Array.isArray(row) && row.length === COLS);
-      if (valid) {
+      if (validGrid) {
         this.grid = saved.grid;
         this.merges = saved.merges || 0;
+        this.gold = saved.gold || 0;
+        this.completed = saved.completed || 0;
+        this.streak = saved.streak || 0;
+        this.lastClaim = saved.lastClaim || null;
+        this.orders = Array.isArray(saved.orders) && saved.orders.length === 3
+          ? saved.orders
+          : this.makeOrders(this.completed);
         return;
       }
     } catch (e) {
@@ -174,18 +200,49 @@ class MainScene extends Phaser.Scene {
   newGame() {
     this.grid = Array.from({ length: ROWS }, () => Array(COLS).fill(0));
     this.merges = 0;
+    this.gold = 0;
+    this.completed = 0;
+    this.streak = 0;
+    this.lastClaim = null;
     this.grid[2][2] = 1;
     this.grid[2][3] = 1;
     this.grid[3][2] = 1;
+    this.orders = this.makeOrders(0);
     this.save();
   }
 
   save() {
     try {
-      localStorage.setItem(SAVE_KEY, JSON.stringify({ grid: this.grid, merges: this.merges }));
+      localStorage.setItem(SAVE_KEY, JSON.stringify({
+        grid: this.grid,
+        merges: this.merges,
+        gold: this.gold,
+        completed: this.completed,
+        streak: this.streak,
+        lastClaim: this.lastClaim,
+        orders: this.orders,
+      }));
     } catch (e) {
       // التخزين مش متاح: اللعبة بتشتغل بدون حفظ
     }
+  }
+
+  // ---------- الطلبات ----------
+
+  makeOrder(completed) {
+    let level;
+    if (completed < 3) level = 1;
+    else if (completed < 8) level = Math.random() < 0.6 ? 1 : 2;
+    else level = [1, 2, 3][Math.floor(Math.random() * 3)];
+
+    const need = level === 1 ? 2 + Math.floor(Math.random() * 3)
+      : level === 2 ? 1 + Math.floor(Math.random() * 2)
+      : 1;
+    return { level, need, have: 0 };
+  }
+
+  makeOrders(completed) {
+    return [0, 1, 2].map(() => this.makeOrder(completed));
   }
 
   // ---------- الأرض (بتنرسم مرة وحدة) ----------
@@ -195,19 +252,19 @@ class MainScene extends Phaser.Scene {
 
     // السماء
     g.fillStyle(0xa9def2, 1);
-    g.fillRect(0, 0, W, 150);
+    g.fillRect(0, 0, W, 90);
     g.fillStyle(0xffffff, 0.85);
-    [[90, 60, 70], [480, 45, 90], [300, 100, 50]].forEach(([x, y, w]) => {
+    [[90, 28, 60], [500, 22, 80]].forEach(([x, y, w]) => {
       g.fillEllipse(x, y, w, w * 0.4);
       g.fillEllipse(x + w * 0.35, y + 6, w * 0.7, w * 0.35);
     });
 
     // العشب
     g.fillStyle(0x7cc05a, 1);
-    g.fillRect(0, 150, W, H - 150);
-    for (let i = 0; i < 90; i++) {
+    g.fillRect(0, 90, W, H - 90);
+    for (let i = 0; i < 110; i++) {
       const x = hash(i * 3) * W;
-      const y = 150 + hash(i * 3 + 1) * (H - 150);
+      const y = 90 + hash(i * 3 + 1) * (H - 90);
       g.fillStyle(0x65a646, 0.5);
       g.fillEllipse(x, y, 18 + hash(i) * 14, 8);
     }
@@ -221,14 +278,12 @@ class MainScene extends Phaser.Scene {
     g.fillStyle(0x6b4a2b, 1);
     g.fillRoundedRect(boardX - 4, boardY - 4, boardW + 8, boardH + 8, 16);
 
-    // خلايا التربة
     for (let r = 0; r < ROWS; r++) {
       for (let c = 0; c < COLS; c++) {
         const x = GRID_X + c * STEP;
         const y = GRID_Y + r * STEP;
         const v = hash(r * COLS + c);
-        const base = v > 0.5 ? 0x9b6b3f : 0x8f5f36;
-        g.fillStyle(base, 1);
+        g.fillStyle(v > 0.5 ? 0x9b6b3f : 0x8f5f36, 1);
         g.fillRoundedRect(x, y, SIZE, SIZE, 10);
         g.fillStyle(0x000000, 0.12);
         for (let k = 0; k < 4; k++) {
@@ -243,34 +298,37 @@ class MainScene extends Phaser.Scene {
   // ---------- الواجهة ----------
 
   createHeader() {
-    this.add.text(W / 2, 42, 'مملكة الدمج', {
-      fontFamily: FONT, fontSize: '36px', fontStyle: 'bold', color: '#4a2e12',
+    this.add.text(W / 2, 34, 'مملكة الدمج', {
+      fontFamily: FONT, fontSize: '32px', fontStyle: 'bold', color: '#4a2e12',
     }).setOrigin(0.5).setDepth(30);
 
-    this.hud = this.add.text(W / 2, 90, '', {
-      fontFamily: FONT, fontSize: '18px', color: '#2b4a1e',
+    this.hud = this.add.text(W / 2, 66, '', {
+      fontFamily: FONT, fontSize: '17px', fontStyle: 'bold', color: '#1f3a14',
     }).setOrigin(0.5).setDepth(30);
 
-    this.message = this.add.text(W / 2, H - 22, '', {
-      fontFamily: FONT, fontSize: '20px', fontStyle: 'bold', color: '#ffffff',
+    this.message = this.add.text(W / 2, H - 14, '', {
+      fontFamily: FONT, fontSize: '19px', fontStyle: 'bold', color: '#ffffff',
       stroke: '#2b4a1e', strokeThickness: 4,
     }).setOrigin(0.5).setDepth(30);
   }
 
   createButtons() {
-    this.makeButton(150, 124, '+ حطب', () => this.spawnWood());
-    this.makeButton(450, 124, 'إعادة', () => {
-      if (window.confirm('تبدأ من جديد؟ التقدم الحالي رح ينمسح.')) {
+    this.makeButton(110, 748, '+ حطب', () => this.spawnWood());
+    this.chestBtn = this.makeButton(300, 748, 'صندوق اليوم', () => this.claimChest());
+    this.makeButton(490, 748, 'إعادة', () => {
+      if (window.confirm('تبدأ من جديد؟ كل التقدم والذهب رح ينمسحوا.')) {
         this.newGame();
         this.renderItems();
+        this.renderVillage();
         this.updateHUD();
+        this.updateChestButton();
         this.say('بداية جديدة');
       }
     });
   }
 
   makeButton(x, y, label, onClick) {
-    const w = 180;
+    const w = 170;
     const h = 42;
     const g = this.add.graphics().setDepth(30);
     const draw = (color) => {
@@ -284,8 +342,8 @@ class MainScene extends Phaser.Scene {
     };
     draw(0x9a6230);
 
-    this.add.text(x, y - 2, label, {
-      fontFamily: FONT, fontSize: '20px', fontStyle: 'bold', color: '#ffffff',
+    const text = this.add.text(x, y - 2, label, {
+      fontFamily: FONT, fontSize: '18px', fontStyle: 'bold', color: '#ffffff',
     }).setOrigin(0.5).setDepth(31);
 
     const hit = this.add.rectangle(x, y, w, h, 0x000000, 0)
@@ -294,16 +352,61 @@ class MainScene extends Phaser.Scene {
     hit.on('pointerdown', () => draw(0x7d4d20));
     hit.on('pointerup', () => { draw(0x9a6230); onClick(); });
     hit.on('pointerout', () => draw(0x9a6230));
+
+    return { setLabel: (t) => text.setText(t) };
   }
 
   updateHUD() {
-    this.hud.setText(`الدمجات: ${this.merges}   ·   حطب ← خشب ← لوح`);
+    this.hud.setText(`الذهب: ${this.gold}   ·   الدمجات: ${this.merges}   ·   سلسلة: ${this.streak} يوم`);
+  }
+
+  updateChestButton() {
+    const today = dayKey(new Date());
+    this.chestBtn.setLabel(this.lastClaim === today ? 'استلمت اليوم' : 'صندوق اليوم');
   }
 
   say(text) {
     this.message.setText(text);
-    this.time.delayedCall(1800, () => {
+    this.time.delayedCall(2000, () => {
       if (this.message.text === text) this.message.setText('');
+    });
+  }
+
+  // ---------- قرية الطلبات ----------
+
+  renderVillage(popIndex = null) {
+    this.villageObjs.forEach((o) => o.destroy());
+    this.villageObjs = [];
+
+    this.orders.forEach((order, i) => {
+      const rect = cardRect(i);
+      const bg = this.add.graphics();
+      bg.fillStyle(0x3d2412, 0.35);
+      bg.fillRoundedRect(3, 4, rect.w, rect.h, 12);
+      bg.fillStyle(0xfbeed0, 1);
+      bg.fillRoundedRect(0, 0, rect.w, rect.h, 12);
+      bg.lineStyle(3, 0x7a4a1e, 1);
+      bg.strokeRoundedRect(1.5, 1.5, rect.w - 3, rect.h - 3, 11);
+
+      const mini = this.add.graphics({ x: 38, y: rect.h / 2 }).setScale(0.42);
+      DRAWERS[order.level](mini);
+
+      const name = this.add.text(76, 14, `${LEVELS[order.level].name} ×${order.need}`, {
+        fontFamily: FONT, fontSize: '17px', fontStyle: 'bold', color: '#4a2e12',
+      }).setOrigin(0, 0.5);
+
+      const progress = this.add.text(76, 42, `${order.have} / ${order.need}`, {
+        fontFamily: FONT, fontSize: '15px', color: '#7a5a3a',
+      }).setOrigin(0, 0.5);
+
+      const card = this.add.container(rect.x, rect.y, [bg, mini, name, progress]);
+      card.setDepth(6);
+      this.villageObjs.push(card);
+
+      if (popIndex === i) {
+        card.setScale(0.9);
+        this.tweens.add({ targets: card, scale: 1, duration: 220, ease: 'Back.Out' });
+      }
     });
   }
 
@@ -342,10 +445,58 @@ class MainScene extends Phaser.Scene {
 
   // ---------- المنطق ----------
 
+  snapBack(obj, from) {
+    obj.setDepth(5);
+    this.tweens.add({
+      targets: obj,
+      x: cellX(from.c),
+      y: cellY(from.r),
+      duration: 120,
+      ease: 'Quad.Out',
+    });
+  }
+
   onDrop(obj) {
     const from = obj.cell;
-    const to = nearestCell(obj.x, obj.y);
     const level = this.grid[from.r][from.c];
+
+    // 1) إفلات على طلب من القرية
+    const cardIndex = cardAt(obj.x, obj.y);
+    if (cardIndex !== -1) {
+      const order = this.orders[cardIndex];
+      if (order.level === level) {
+        this.grid[from.r][from.c] = 0;
+        order.have++;
+        if (order.have >= order.need) {
+          const reward = LEVELS[order.level].reward * order.need;
+          this.gold += reward;
+          this.completed++;
+          this.orders[cardIndex] = this.makeOrder(this.completed);
+          this.say(`اكتمل الطلب! +${reward} ذهب`);
+          this.save();
+          this.renderItems();
+          this.renderVillage(cardIndex);
+        } else {
+          this.save();
+          this.renderItems();
+          this.renderVillage(null);
+        }
+        this.updateHUD();
+      } else {
+        this.say(`القرية بدها ${LEVELS[order.level].name}، مش ${LEVELS[level].name}`);
+        this.snapBack(obj, from);
+      }
+      return;
+    }
+
+    // 2) إفلات داخل منطقة القرية بس مش على طلب: رجوع
+    if (obj.y < VILLAGE_Y + VILLAGE_H + 10) {
+      this.snapBack(obj, from);
+      return;
+    }
+
+    // 3) إفلات على الشبكة: نقل أو دمج
+    const to = nearestCell(obj.x, obj.y);
     let merged = false;
     let moved = false;
 
@@ -370,15 +521,7 @@ class MainScene extends Phaser.Scene {
       this.renderItems(merged && to ? to : null);
       this.updateHUD();
     } else {
-      // رجوع للمكان الأصلي بحركة ناعمة
-      obj.setDepth(5);
-      this.tweens.add({
-        targets: obj,
-        x: cellX(from.c),
-        y: cellY(from.r),
-        duration: 120,
-        ease: 'Quad.Out',
-      });
+      this.snapBack(obj, from);
     }
   }
 
@@ -398,6 +541,24 @@ class MainScene extends Phaser.Scene {
     this.save();
     this.renderItems(pick);
     this.updateHUD();
+  }
+
+  claimChest() {
+    const now = new Date();
+    const today = dayKey(now);
+    if (this.lastClaim === today) {
+      this.say('استلمت صندوق اليوم، ارجع بكرة');
+      return;
+    }
+    const yesterday = dayKey(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1));
+    this.streak = this.lastClaim === yesterday ? this.streak + 1 : 1;
+    const reward = 30 + 10 * Math.min(this.streak, 7);
+    this.gold += reward;
+    this.lastClaim = today;
+    this.save();
+    this.updateHUD();
+    this.updateChestButton();
+    this.say(`صندوق اليوم: +${reward} ذهب، سلسلة ${this.streak} يوم`);
   }
 }
 
