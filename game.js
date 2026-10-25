@@ -413,7 +413,7 @@ class KingdomScene extends Phaser.Scene {
       return;
     }
 
-    this.orders.forEach((order, i) => {
+    state.orders.forEach((order, i) => {
       const rect = cardRect(i);
       const bg = this.add.graphics();
       bg.fillStyle(0x3d2412, 0.35);
