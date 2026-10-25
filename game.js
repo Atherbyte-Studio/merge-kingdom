@@ -1,6 +1,6 @@
-// مملكة الدمج - مراحل متسلسلة (١٠ مراحل)، بناء بالعمال، مواد متعددة، ومعارك الحرب العالمية الأولى.
-// كل مرحلة: دقيقة لتجهيز المواد للعمال، والعمال بيبنوا كل مبنى بوقت.
-// إذا نسبة البناء ٨٠٪ أو أكثر وقت الانتهاء، الدفاع يصمد وتنفتح المرحلة الجاية. وإلا الهجوم ينتصر وتعيد المرحلة.
+// مملكة الدمج
+// - المراحل: ١٠ مراحل متسلسلة، كل مرحلة دقيقة لتجهيز المواد للعمال، وبعدين هجوم.
+// - المدينة: تبنيها على مدار شهر حقيقي (٣٠ يوم)، مبنى ورا مبنى، ومستمر حتى لو سكّرت اللعبة.
 
 const W = 600;
 const H = 800;
@@ -12,14 +12,15 @@ const STEP = SIZE + GAP;
 const GRID_X = 40;
 const GRID_Y = 178;
 const MAX_ITEM_LEVEL = 3;
-const SAVE_KEY = 'merge-kingdom-save-v2';
+const SAVE_KEY = 'merge-kingdom-save-v3';
 const FONT = 'system-ui, Tahoma, sans-serif';
 const SERIF = 'Georgia, "Times New Roman", serif';
 
 const LEVEL_COUNT = 10;
-const MISSION_MS = 60000;   // وقت المرحلة
-const BUILD_MS = 12000;     // وقت بناء المبنى بعد ما تنجمع مواده
+const MISSION_MS = 60000;
+const BUILD_MS = 12000;
 const WIN_RATIO = 0.8;
+const DAY_MS = 86400000;
 
 const VILLAGE_Y = 100;
 const VILLAGE_H = 70;
@@ -27,7 +28,6 @@ const CARD_W = 180;
 const CARD_GAP = 10;
 const CARD_X0 = (W - (3 * CARD_W + 2 * CARD_GAP)) / 2;
 
-// نقاط كل مستوى من أي مادة: المستوى ١ = ١، ٢ = ٣، ٣ = ٩
 const POINTS = { 1: 1, 2: 3, 3: 9 };
 
 const ITEM_NAMES = {
@@ -38,7 +38,6 @@ const ITEM_NAMES = {
 const RES_LABEL = { wood: 'خشب', stone: 'حجر', iron: 'حديد' };
 const SPAWN_TYPES = ['wood', 'stone', 'iron'];
 
-// مبنى جديد مختلف لكل مرحلة (الحرب العالمية الأولى)
 const EXTRAS = [
   { key: 'sandbag', name: 'أكياس رمل', req: { stone: 6 } },
   { key: 'wire', name: 'أسلاك شائكة', req: { iron: 9 } },
@@ -52,12 +51,20 @@ const EXTRAS = [
   { key: 'depot', name: 'مخزن ذخيرة', req: { wood: 9, stone: 9 } },
 ];
 
-const CASTLE_PARTS = [
-  { key: 'foundation', name: 'الأساس', cost: 100, needs: null },
-  { key: 'walls', name: 'الأسوار', cost: 200, needs: 'foundation' },
-  { key: 'tower', name: 'البرج', cost: 300, needs: 'walls' },
-  { key: 'roof', name: 'السقف', cost: 400, needs: 'tower' },
+// مدينة: ١٠ مباني، مجموع أيامها ٣٠ يوم، وعامل واحد يبني بالتسلسل
+const CITY = [
+  { key: 'house', name: 'بيوت', days: 1, cost: 50, color: 0xc0504d },
+  { key: 'farm', name: 'مزرعة', days: 2, cost: 80, color: 0xd9a441 },
+  { key: 'market', name: 'سوق', days: 2, cost: 120, color: 0xb07a4a },
+  { key: 'workshop', name: 'ورشة', days: 3, cost: 180, color: 0x5a6b8a },
+  { key: 'school', name: 'مدرسة', days: 2, cost: 150, color: 0x6aa84f },
+  { key: 'barracks', name: 'ثكنة', days: 3, cost: 200, color: 0x7a6a4a },
+  { key: 'gate', name: 'بوابة المدينة', days: 2, cost: 160, color: 0xa98c5c },
+  { key: 'wall', name: 'سور المدينة', days: 5, cost: 300, color: 0x8a8a7e },
+  { key: 'hall', name: 'دار البلدية', days: 4, cost: 350, color: 0xc9b48a },
+  { key: 'monument', name: 'نصب الجنود', days: 6, cost: 500, color: 0x9a7b3c },
 ];
+const CITY_TOTAL_DAYS = CITY.reduce((s, b) => s + b.days, 0);
 
 // ---------- أدوات عامة ----------
 
@@ -97,6 +104,16 @@ function lerpColor(a, b, t) {
   const ar = (a >> 16) & 255, ag = (a >> 8) & 255, ab = a & 255;
   const br = (b >> 16) & 255, bg = (b >> 8) & 255, bb = b & 255;
   return (Math.round(ar + (br - ar) * t) << 16) | (Math.round(ag + (bg - ag) * t) << 8) | Math.round(ab + (bb - ab) * t);
+}
+
+// "٣ أيام و٤ ساعات" أو "٥٠ دقيقة" للعرض
+function fmtLeft(ms) {
+  const d = Math.floor(ms / DAY_MS);
+  const h = Math.floor((ms % DAY_MS) / 3600000);
+  const m = Math.floor((ms % 3600000) / 60000);
+  if (d > 0) return `${d} يوم و${h} ساعة`;
+  if (h > 0) return `${h} ساعة و${m} دقيقة`;
+  return `${Math.max(1, m)} دقيقة`;
 }
 
 // ---------- صوت واهتزاز (اختياري) ----------
@@ -148,7 +165,7 @@ function buzz(ms) {
   try { if (navigator.vibrate) navigator.vibrate(ms); } catch (e) { /* مش مدعوم */ }
 }
 
-// ---------- تأثيرات ----------
+// ---------- تأثيرات وأزرار ----------
 
 function burst(scene, x, y, color) {
   for (let i = 0; i < 10; i++) {
@@ -178,8 +195,8 @@ function floatText(scene, x, y, text, color) {
   });
 }
 
-function makeButton(scene, x, y, w, h, label, onClick, active = false) {
-  const g = scene.add.graphics().setDepth(30);
+function makeButton(scene, x, y, w, h, label, onClick, active = false, depth = 30) {
+  const g = scene.add.graphics().setDepth(depth);
   const draw = (color) => {
     g.clear();
     g.fillStyle(0x4a2e12, 1);
@@ -193,47 +210,59 @@ function makeButton(scene, x, y, w, h, label, onClick, active = false) {
   draw(base);
   const text = scene.add.text(x, y - 2, label, {
     fontFamily: FONT, fontSize: '17px', fontStyle: 'bold', color: '#ffffff',
-  }).setOrigin(0.5).setDepth(31);
+  }).setOrigin(0.5).setDepth(depth + 1);
   const hit = scene.add.rectangle(x, y, w, h, 0x000000, 0)
-    .setDepth(32)
+    .setDepth(depth + 2)
     .setInteractive({ useHandCursor: true });
   hit.on('pointerdown', () => draw(0x7d4d20));
   hit.on('pointerup', () => { draw(base); onClick(); });
   hit.on('pointerout', () => draw(base));
-  return { setLabel: (t) => text.setText(t) };
+  return {
+    setLabel: (t) => text.setText(t),
+    destroy: () => { g.destroy(); text.destroy(); hit.destroy(); },
+  };
 }
 
-// ---------- رسم المواد ----------
+// ---------- رسم المواد (على لوح كريمي عشان تتوضح) ----------
+
+function drawPlate(g) {
+  g.fillStyle(0x000000, 0.22);
+  g.fillRoundedRect(-36, -34, 74, 74, 14);
+  g.fillStyle(0xfbf1d6, 1);
+  g.fillRoundedRect(-37, -37, 74, 74, 14);
+  g.lineStyle(2, 0x7a4a1e, 0.6);
+  g.strokeRoundedRect(-37, -37, 74, 74, 14);
+}
 
 function drawLog(g) {
   g.fillStyle(0x000000, 0.18);
   g.fillEllipse(0, 27, 66, 12);
   [{ x: -30, y: -15, w: 60 }, { x: -26, y: 3, w: 56 }].forEach(({ x, y, w }) => {
     const h = 18;
-    g.fillStyle(0x7a4a22, 1);
+    g.fillStyle(0x6a3c18, 1);
     g.fillRoundedRect(x, y, w, h, 9);
-    g.fillStyle(0x9a6230, 1);
+    g.fillStyle(0xa86a36, 1);
     g.fillRoundedRect(x + 2, y + 2, w - 4, h - 7, 7);
-    g.lineStyle(1, 0x4a2c12, 0.55);
+    g.lineStyle(1, 0x3a2010, 0.6);
     g.lineBetween(x + 12, y + 4, x + 24, y + 4);
     g.lineBetween(x + 30, y + 13, x + 48, y + 13);
     const cx = x + 4;
     const cy = y + h / 2;
-    g.fillStyle(0xe2b07a, 1); g.fillCircle(cx, cy, 8);
+    g.fillStyle(0xf0c088, 1); g.fillCircle(cx, cy, 8);
     g.fillStyle(0xc08a52, 1); g.fillCircle(cx, cy, 5);
-    g.fillStyle(0xe2b07a, 1); g.fillCircle(cx, cy, 2);
+    g.fillStyle(0xf0c088, 1); g.fillCircle(cx, cy, 2);
   });
 }
 
 function drawPlanks(g) {
   g.fillStyle(0x000000, 0.18);
   g.fillEllipse(0, 27, 68, 12);
-  [{ y: -22, color: 0xd9a06a }, { y: -6, color: 0xc68642 }, { y: 10, color: 0xd09052 }].forEach(({ y, color }) => {
+  [{ y: -22, color: 0xe8a868 }, { y: -6, color: 0xd48a3e }, { y: 10, color: 0xe09a5a }].forEach(({ y, color }) => {
     g.fillStyle(0x6b4220, 1);
     g.fillRoundedRect(-33, y, 66, 15, 4);
     g.fillStyle(color, 1);
     g.fillRoundedRect(-32, y + 1, 64, 13, 3);
-    g.lineStyle(1, 0x7a4a22, 0.45);
+    g.lineStyle(1, 0x7a4a22, 0.5);
     g.lineBetween(-26, y + 5, 18, y + 4);
     g.lineBetween(-10, y + 10, 26, y + 9);
     g.fillStyle(0x3d2e22, 1);
@@ -245,13 +274,13 @@ function drawPlanks(g) {
 function drawBoard(g) {
   g.fillStyle(0x000000, 0.18);
   g.fillEllipse(0, 30, 74, 12);
-  g.fillStyle(0x7a4a22, 1);
+  g.fillStyle(0x6a3c18, 1);
   g.fillRoundedRect(-36, -28, 72, 56, 6);
-  g.fillStyle(0xf1c27d, 1);
+  g.fillStyle(0xffd48a, 1);
   g.fillRoundedRect(-34, -26, 68, 52, 5);
-  g.fillStyle(0xffffff, 0.22);
+  g.fillStyle(0xffffff, 0.35);
   g.fillRoundedRect(-30, -22, 60, 10, 4);
-  g.lineStyle(1, 0xb9833e, 0.5);
+  g.lineStyle(1, 0xb9833e, 0.6);
   [-10, 0, 10, 18].forEach((y) => g.lineBetween(-28, y, 26, y + 1));
   g.lineBetween(-10, -20, 20, -18);
   g.fillStyle(0x3d2e22, 1);
@@ -262,16 +291,16 @@ function drawStone1(g) {
   g.fillStyle(0x000000, 0.18);
   g.fillEllipse(0, 27, 66, 12);
   [
-    { x: -22, y: 6, r: 11, c: 0x8e8e88 },
-    { x: 4, y: 10, r: 13, c: 0x7a7a74 },
-    { x: 22, y: 2, r: 10, c: 0x9c9c96 },
-    { x: -6, y: -8, r: 9, c: 0xa8a8a2 },
+    { x: -22, y: 6, r: 11, c: 0x7a7a74 },
+    { x: 4, y: 10, r: 13, c: 0x5e5e58 },
+    { x: 22, y: 2, r: 10, c: 0x8e8e88 },
+    { x: -6, y: -8, r: 9, c: 0x9c9c96 },
   ].forEach(({ x, y, r, c }) => {
-    g.fillStyle(0x4a4a46, 0.6);
+    g.fillStyle(0x2e2e2a, 0.7);
     g.fillEllipse(x, y + 3, r * 2, r * 1.5);
     g.fillStyle(c, 1);
     g.fillEllipse(x, y, r * 2, r * 1.6);
-    g.fillStyle(0xffffff, 0.25);
+    g.fillStyle(0xffffff, 0.35);
     g.fillEllipse(x - r * 0.3, y - r * 0.3, r * 0.8, r * 0.5);
   });
 }
@@ -279,13 +308,13 @@ function drawStone1(g) {
 function drawStone2(g) {
   g.fillStyle(0x000000, 0.18);
   g.fillEllipse(0, 27, 68, 12);
-  g.fillStyle(0x6a6a64, 1);
+  g.fillStyle(0x4e4e48, 1);
   g.fillRoundedRect(-30, -20, 60, 44, 12);
   g.fillStyle(0x8e8e88, 1);
   g.fillRoundedRect(-28, -22, 56, 40, 11);
-  g.fillStyle(0xbdbdb6, 0.5);
+  g.fillStyle(0xd0d0c8, 0.6);
   g.fillRoundedRect(-22, -16, 30, 10, 5);
-  g.lineStyle(1, 0x4a4a46, 0.6);
+  g.lineStyle(2, 0x3a3a36, 0.7);
   g.lineBetween(-4, -6, 8, 4);
   g.lineBetween(8, 4, 14, -2);
 }
@@ -293,15 +322,15 @@ function drawStone2(g) {
 function drawStone3(g) {
   g.fillStyle(0x000000, 0.18);
   g.fillEllipse(0, 30, 74, 12);
-  g.fillStyle(0x6a6a64, 1);
+  g.fillStyle(0x4e4e48, 1);
   g.fillRoundedRect(-34, -4, 68, 22, 3);
   g.fillStyle(0x9a9a92, 1);
   g.fillRoundedRect(-32, -6, 64, 20, 3);
-  g.fillStyle(0x6a6a64, 1);
+  g.fillStyle(0x4e4e48, 1);
   g.fillRoundedRect(-28, -26, 56, 22, 3);
-  g.fillStyle(0xa8a8a0, 1);
+  g.fillStyle(0xbcbcb4, 1);
   g.fillRoundedRect(-26, -28, 52, 20, 3);
-  g.lineStyle(1, 0x5a5a54, 0.5);
+  g.lineStyle(1, 0x3a3a36, 0.6);
   g.lineBetween(-6, -28, -6, -8);
   g.lineBetween(10, -6, 10, 14);
 }
@@ -309,13 +338,13 @@ function drawStone3(g) {
 function drawIron1(g) {
   g.fillStyle(0x000000, 0.18);
   g.fillEllipse(0, 27, 66, 12);
-  g.fillStyle(0x5a5f66, 1);
+  g.fillStyle(0x2e343c, 1);
   g.fillTriangle(-26, 8, -14, -6, -4, 10);
-  g.fillStyle(0x7a6a5a, 1);
+  g.fillStyle(0x4a4f58, 1);
   g.fillTriangle(0, 12, 12, -4, 22, 12);
-  g.fillStyle(0x4a4f56, 1);
+  g.fillStyle(0x1e2228, 1);
   g.fillTriangle(-14, -10, 2, -18, 10, -4);
-  g.fillStyle(0x9a5a32, 1);
+  g.fillStyle(0xb8602e, 1);
   g.fillCircle(16, -8, 4);
   g.fillCircle(-18, -2, 3);
 }
@@ -324,13 +353,13 @@ function drawIron2(g) {
   g.fillStyle(0x000000, 0.18);
   g.fillEllipse(0, 27, 68, 12);
   [-22, -8, 6].forEach((y) => {
-    g.fillStyle(0x4a525c, 1);
+    g.fillStyle(0x2a3038, 1);
     g.fillRoundedRect(-34, y, 68, 10, 4);
-    g.fillStyle(0x6f7a86, 1);
+    g.fillStyle(0x6f8aa0, 1);
     g.fillRoundedRect(-34, y, 68, 7, 4);
-    g.fillStyle(0xb8c2cc, 0.6);
+    g.fillStyle(0xdfe8f0, 0.7);
     g.fillRoundedRect(-30, y + 1, 30, 2, 1);
-    g.fillStyle(0x3a424c, 1);
+    g.fillStyle(0x1e2228, 1);
     g.fillCircle(-30, y + 5, 2);
     g.fillCircle(30, y + 5, 2);
   });
@@ -339,15 +368,15 @@ function drawIron2(g) {
 function drawIron3(g) {
   g.fillStyle(0x000000, 0.18);
   g.fillEllipse(0, 30, 74, 12);
-  g.fillStyle(0x4f5a66, 1);
+  g.fillStyle(0x2a3038, 1);
   g.fillRoundedRect(-32, -24, 64, 48, 4);
-  g.fillStyle(0x6b7785, 1);
+  g.fillStyle(0x5e7488, 1);
   g.fillRoundedRect(-29, -21, 58, 42, 3);
-  g.fillStyle(0xb8c2cc, 0.35);
+  g.fillStyle(0xdfe8f0, 0.45);
   g.fillRoundedRect(-26, -18, 52, 8, 3);
-  g.lineStyle(1, 0x3a424c, 0.5);
+  g.lineStyle(1, 0x1e2228, 0.6);
   g.lineBetween(-20, 4, 20, 4);
-  g.fillStyle(0x2e343c, 1);
+  g.fillStyle(0x1e2228, 1);
   [[-26, -18], [26, -18], [-26, 18], [26, 18]].forEach(([x, y]) => g.fillCircle(x, y, 2.5));
 }
 
@@ -357,9 +386,8 @@ const ITEM_DRAWERS = {
   iron: { 1: drawIron1, 2: drawIron2, 3: drawIron3 },
 };
 
-// ---------- الجنود والعمال ----------
+// ---------- الجنود والعمال والمباني ----------
 
-// الجندي: مركزه عند القدمين. scaleX سالب = يواجه اليسار
 function drawSoldier(g, uniform) {
   g.fillStyle(0x000000, 0.25);
   g.fillEllipse(0, 2, 22, 6);
@@ -378,7 +406,6 @@ function drawSoldier(g, uniform) {
   g.lineBetween(9, -36, 26, -54);
 }
 
-// العامل: بخوذة وشاكوش
 function drawWorker(g) {
   g.fillStyle(0x000000, 0.25);
   g.fillEllipse(0, 2, 16, 5);
@@ -397,7 +424,51 @@ function drawWorker(g) {
   g.fillRect(9, -30, 4, 6);
 }
 
-// ---------- الحالة ----------
+// مبنى المدينة (مركزه 0,0، حجمه تقريباً ٦٠×٦٠)
+function drawCityBuilding(g, b) {
+  g.fillStyle(0x000000, 0.2);
+  g.fillEllipse(0, 24, 56, 10);
+  if (b.key === 'monument') {
+    g.fillStyle(0x7a5e2a, 1);
+    g.fillRect(-14, 8, 28, 14);
+    g.fillStyle(b.color, 1);
+    g.fillTriangle(-8, 8, 8, 8, 0, -28);
+    g.fillRect(-8, -6, 16, 14);
+    return;
+  }
+  if (b.key === 'wall') {
+    g.fillStyle(0x6a6a64, 1);
+    g.fillRect(-28, -6, 56, 20);
+    for (let x = -28; x < 28; x += 12) g.fillRect(x, -14, 7, 8);
+    return;
+  }
+  if (b.key === 'gate') {
+    g.fillStyle(0x8a7a5a, 1);
+    g.fillRect(-24, -20, 10, 34);
+    g.fillRect(14, -20, 10, 34);
+    g.fillRect(-24, -22, 48, 8);
+    g.fillStyle(0x4a2e12, 1);
+    g.fillRoundedRect(-6, -2, 12, 16, 5);
+    return;
+  }
+  if (b.key === 'farm') {
+    g.fillStyle(0x8a6a2a, 1);
+    g.fillRoundedRect(-28, -8, 56, 24, 4);
+    g.lineStyle(2, 0xe8c25a, 1);
+    [-18, -6, 6, 18].forEach((x) => g.lineBetween(x, -4, x, 14));
+    return;
+  }
+  g.fillStyle(0x6a4a2a, 1);
+  g.fillRect(-18, -12, 36, 26);
+  g.fillStyle(0xf0e0b0, 1);
+  g.fillRect(-16, -10, 32, 22);
+  g.fillStyle(b.color, 1);
+  g.fillTriangle(-22, -12, 22, -12, 0, -30);
+  g.fillStyle(0x4a2e12, 1);
+  g.fillRect(-4, 2, 8, 12);
+}
+
+// ---------- المراحل والحالة ----------
 
 let state = null;
 
@@ -421,6 +492,7 @@ function makeMission(level) {
     level,
     startedAt: Date.now(),
     status: 'building',
+    paused: false,
     buildings: levelDef(level).map((b) => {
       const delivered = {};
       Object.keys(b.req).forEach((k) => { delivered[k] = 0; });
@@ -429,23 +501,37 @@ function makeMission(level) {
   };
 }
 
-// نسبة مواد المبنى المجمّعة (0..1)
+// الوقت الفعلي للمرحلة: لو متوقفة بيوقف عند لحظة الإيقاف
+function mNow() {
+  const m = state.mission;
+  return m && m.paused ? m.pausedAt : Date.now();
+}
+
 function materialFrac(b) {
   const need = Object.values(b.req).reduce((s, v) => s + v, 0);
   const have = Object.keys(b.req).reduce((s, k) => s + Math.min(b.delivered[k] || 0, b.req[k]), 0);
   return need ? have / need : 0;
 }
 
-// تقدم المبنى: المواد نص، والبناء نص
-function buildProgress(b, now = Date.now()) {
+function buildProgress(b, now = mNow()) {
   if (b.done) return 1;
   if (b.buildStartedAt) return 0.5 + 0.5 * Math.min(1, (now - b.buildStartedAt) / BUILD_MS);
   return 0.5 * materialFrac(b);
 }
 
-function missionRatio(now = Date.now()) {
+function missionRatio(now = mNow()) {
   const bs = state.mission.buildings;
   return bs.reduce((s, b) => s + buildProgress(b, now), 0) / bs.length;
+}
+
+function cityDone() {
+  return CITY.reduce((s, b) => s + (state.city[b.key].status === 'done' ? b.days : 0), 0);
+}
+
+function newCity() {
+  const city = {};
+  CITY.forEach((b) => { city[b.key] = { status: 'idle', startedAt: 0, endsAt: 0 }; });
+  return city;
 }
 
 function newState() {
@@ -463,7 +549,7 @@ function newState() {
     unlocked: 1,
     completed: 0,
     mission: null,
-    castle: { foundation: false, walls: false, tower: false, roof: false },
+    city: newCity(),
   };
 }
 
@@ -481,7 +567,9 @@ function loadState() {
       saved.grid.every((row) => Array.isArray(row) && row.length === COLS && row.every(validCell));
     if (validGrid) {
       const merged = Object.assign(newState(), saved);
-      merged.castle = Object.assign({ foundation: false, walls: false, tower: false, roof: false }, saved.castle || {});
+      const city = newCity();
+      Object.keys(saved.city || {}).forEach((k) => { if (city[k]) city[k] = saved.city[k]; });
+      merged.city = city;
       return merged;
     }
   } catch (e) {
@@ -498,7 +586,7 @@ function saveState() {
   }
 }
 
-// ---------- قائمة المراحل ----------
+// ---------- قائمة المراحل (الصفحة الرئيسية) ----------
 
 class LevelsScene extends Phaser.Scene {
   constructor() {
@@ -532,7 +620,11 @@ class LevelsScene extends Phaser.Scene {
       this.levelCard(L, 175 + col * 260, 200 + row * 108);
     }
 
-    makeButton(this, 300, 748, 240, 46, 'القصر', () => this.scene.start('castle'));
+    const cityDoneDays = cityDone();
+    this.add.text(W / 2, 700, `تقدم المدينة: ${cityDoneDays} من ${CITY_TOTAL_DAYS} يوم`, {
+      fontFamily: FONT, fontSize: '15px', fontStyle: 'bold', color: '#1f3a14',
+    }).setOrigin(0.5);
+    makeButton(this, 300, 748, 240, 46, 'المدينة', () => this.scene.start('city'));
 
     if (this.toast) this.say(this.toast);
   }
@@ -574,7 +666,7 @@ class LevelsScene extends Phaser.Scene {
     this.add.text(cx - w / 2 + 16, cy + 6, open ? `جديد: ${def.name}` : 'مقفلة', {
       fontFamily: FONT, fontSize: '14px', color: open ? '#6a4a2a' : '#55504a',
     }).setOrigin(0, 0.5).setDepth(6);
-    this.add.text(cx - w / 2 + 16, cy + 28, done ? '✓ مكتملة' : (open ? 'مفتوحة' : '🔒'), {
+    this.add.text(cx - w / 2 + 16, cy + 28, done ? '✓ مكتملة' : (open ? 'مفتوحة' : 'مقفلة 🔒'), {
       fontFamily: FONT, fontSize: '13px', fontStyle: 'bold', color: done ? '#2f5a1c' : '#6a4a2a',
     }).setOrigin(0, 0.5).setDepth(6);
 
@@ -600,7 +692,7 @@ class LevelsScene extends Phaser.Scene {
   }
 }
 
-// ---------- المملكة ----------
+// ---------- المملكة (المرحلة الحالية) ----------
 
 class KingdomScene extends Phaser.Scene {
   constructor() {
@@ -617,6 +709,7 @@ class KingdomScene extends Phaser.Scene {
     this.villageObjs = [];
     this.cardRefs = [];
     this.inBattle = false;
+    this.pauseObjs = [];
 
     if (!state.mission) {
       this.scene.start('levels');
@@ -648,6 +741,7 @@ class KingdomScene extends Phaser.Scene {
       this.say('اسحب المواد على البطاقات، والعمال بيبنوا');
     }
 
+    if (state.mission.paused) this.showPause();
     if (state.mission.status === 'battle') {
       this.time.delayedCall(400, () => this.startBattle());
     }
@@ -707,24 +801,83 @@ class KingdomScene extends Phaser.Scene {
   }
 
   createButtons() {
-    makeButton(this, 190, 52, 150, 32, 'المراحل', () => this.scene.start('levels'));
-    makeButton(this, 410, 52, 150, 32, 'القصر', () => this.scene.start('castle'));
+    makeButton(this, 120, 52, 180, 32, '⟵ المراحل', () => this.leave('levels'));
+    makeButton(this, 480, 52, 180, 32, 'المدينة', () => this.leave('city'));
 
     makeButton(this, 110, 748, 170, 42, '+ مواد', () => this.spawnItem());
     this.chestBtn = makeButton(this, 300, 748, 170, 42, 'صندوق اليوم', () => this.claimChest());
-    makeButton(this, 490, 748, 170, 42, 'إعادة', () => {
-      if (window.confirm('تبدأ من أول شي؟ كل التقدم والمراحل والذهب رح ينمسحوا.')) {
-        state = newState();
-        saveState();
-        this.scene.start('levels');
-      }
+    makeButton(this, 490, 748, 170, 42, 'إيقاف مؤقت', () => this.pauseMission());
+  }
+
+  // الخروج من المرحلة بيوقفها تلقائياً
+  leave(target) {
+    if (state.mission && state.mission.status === 'building' && !state.mission.paused) {
+      state.mission.paused = true;
+      state.mission.pausedAt = Date.now();
+      saveState();
+    }
+    this.scene.start(target);
+  }
+
+  // ---------- الإيقاف المؤقت ----------
+
+  pauseMission() {
+    const m = state.mission;
+    if (m.status !== 'building' || m.paused || this.inBattle) return;
+    m.paused = true;
+    m.pausedAt = Date.now();
+    saveState();
+    this.showPause();
+  }
+
+  resumeMission() {
+    const m = state.mission;
+    if (!m.paused) return;
+    const delta = Date.now() - m.pausedAt;
+    m.startedAt += delta;
+    m.buildings.forEach((b) => { if (b.buildStartedAt) b.buildStartedAt += delta; });
+    m.paused = false;
+    delete m.pausedAt;
+    saveState();
+    this.hidePause();
+    this.updateHUD();
+  }
+
+  restartMission() {
+    if (!window.confirm('تبدأ المرحلة من جديد؟ المواد والبناء بيرجعوا لصفر.')) return;
+    state.mission = makeMission(state.mission.level);
+    saveState();
+    this.scene.restart({ toast: 'المرحلة بدأت من جديد' });
+  }
+
+  showPause() {
+    this.hidePause();
+    const dim = this.add.rectangle(W / 2, H / 2, W, H, 0x000000, 0.6).setDepth(90).setInteractive();
+    const title = this.add.text(W / 2, 290, 'متوقف مؤقتاً', {
+      fontFamily: SERIF, fontSize: '42px', fontStyle: 'bold', color: '#f7e7b4',
+      stroke: '#2a1e10', strokeThickness: 6,
+    }).setOrigin(0.5).setDepth(91);
+    const note = this.add.text(W / 2, 340, 'الوقت والبناء واقفين حتى تكمل', {
+      fontFamily: FONT, fontSize: '16px', color: '#ffffff',
+    }).setOrigin(0.5).setDepth(91);
+    const b1 = makeButton(this, W / 2, 420, 240, 50, 'متابعة', () => this.resumeMission(), false, 92);
+    const b2 = makeButton(this, W / 2, 490, 240, 50, 'إعادة المرحلة', () => this.restartMission(), false, 92);
+    const b3 = makeButton(this, W / 2, 560, 240, 50, 'العودة للمراحل', () => this.leave('levels'), false, 92);
+    this.pauseObjs = [dim, title, note, b1, b2, b3];
+  }
+
+  hidePause() {
+    this.pauseObjs.forEach((o) => {
+      if (o && o.destroy) o.destroy();
     });
+    this.pauseObjs = [];
   }
 
   updateHUD() {
     const m = state.mission;
     const left = m.status === 'building' ? this.timeLeft() : 0;
-    this.hud.setText(`المرحلة ${m.level}  ·  باقي ${left} ث  ·  البناء ${Math.round(missionRatio() * 100)}%  ·  الذهب ${state.gold}`);
+    const pausedTag = m.paused ? '  ·  متوقف' : '';
+    this.hud.setText(`المرحلة ${m.level}  ·  باقي ${left} ث  ·  البناء ${Math.round(missionRatio() * 100)}%  ·  الذهب ${state.gold}${pausedTag}`);
   }
 
   updateChestButton() {
@@ -739,11 +892,11 @@ class KingdomScene extends Phaser.Scene {
   }
 
   timeLeft() {
-    return Math.max(0, Math.ceil((MISSION_MS - (Date.now() - state.mission.startedAt)) / 1000));
+    return Math.max(0, Math.ceil((MISSION_MS - (mNow() - state.mission.startedAt)) / 1000));
   }
 
   tick() {
-    if (this.inBattle || state.mission.status !== 'building') return;
+    if (this.inBattle || state.mission.paused || state.mission.status !== 'building') return;
     const now = Date.now();
     const bs = state.mission.buildings;
 
@@ -822,7 +975,7 @@ class KingdomScene extends Phaser.Scene {
     state.mission.buildings.forEach((b, i) => {
       const ref = this.cardRefs[i];
       if (!ref) return;
-      const p = buildProgress(b, now);
+      const p = buildProgress(b, state.mission.paused ? state.mission.pausedAt : now);
       const rect = cardRect(i);
       const barW = rect.w - 28;
       ref.bar.clear();
@@ -851,6 +1004,7 @@ class KingdomScene extends Phaser.Scene {
 
   makeItem(r, c, item, pop) {
     const g = this.add.graphics({ x: cellX(c), y: cellY(r) }).setDepth(5);
+    drawPlate(g);
     ITEM_DRAWERS[item.t][item.l](g);
     g.setInteractive(
       new Phaser.Geom.Rectangle(-SIZE / 2 - 4, -SIZE / 2 - 4, SIZE + 8, SIZE + 8),
@@ -903,7 +1057,7 @@ class KingdomScene extends Phaser.Scene {
     const item = state.grid[from.r][from.c];
     if (!item) return;
 
-    if (this.inBattle) {
+    if (this.inBattle || state.mission.paused) {
       this.snapBack(obj, from);
       return;
     }
@@ -1014,7 +1168,7 @@ class KingdomScene extends Phaser.Scene {
     this.inBattle = true;
     state.mission.status = 'battle';
     saveState();
-    const ratio = missionRatio();
+    const ratio = missionRatio(Date.now());
     this.scene.launch('battle', {
       won: ratio >= WIN_RATIO,
       ratio,
@@ -1044,7 +1198,7 @@ class KingdomScene extends Phaser.Scene {
   }
 
   spawnItem() {
-    if (this.inBattle) return;
+    if (this.inBattle || state.mission.paused) return;
     const empty = [];
     for (let r = 0; r < ROWS; r++) {
       for (let c = 0; c < COLS; c++) {
@@ -1080,6 +1234,199 @@ class KingdomScene extends Phaser.Scene {
     this.updateChestButton();
     this.say(`صندوق اليوم: +${reward} ذهب، سلسلة ${state.streak} يوم`);
     floatText(this, 300, 700, `+${reward}`, '#c98a10');
+  }
+}
+
+// ---------- المدينة (بتاخد شهر حقيقي) ----------
+
+class CityScene extends Phaser.Scene {
+  constructor() {
+    super('city');
+  }
+
+  create() {
+    this.input.topOnly = true;
+    this.cardObjs = [];
+    this.cardRefs = [];
+
+    this.drawPlot();
+    this.add.text(W / 2, 24, 'المدينة', {
+      fontFamily: FONT, fontSize: '28px', fontStyle: 'bold', color: '#4a2e12',
+    }).setOrigin(0.5).setDepth(30);
+    this.hud = this.add.text(W / 2, 62, '', {
+      fontFamily: FONT, fontSize: '15px', fontStyle: 'bold', color: '#1f3a14',
+    }).setOrigin(0.5).setDepth(30);
+    this.note = this.add.text(W / 2, 84, 'عامل واحد يبني بالتسلسل، والوقت بيكمل حتى لو سكّرت اللعبة', {
+      fontFamily: FONT, fontSize: '12px', color: '#1f3a14',
+    }).setOrigin(0.5).setDepth(30);
+    this.message = this.add.text(W / 2, H - 14, '', {
+      fontFamily: FONT, fontSize: '18px', fontStyle: 'bold', color: '#ffffff',
+      stroke: '#2b4a1e', strokeThickness: 4,
+    }).setOrigin(0.5).setDepth(30);
+
+    makeButton(this, 120, 52, 180, 32, '⟵ المراحل', () => this.scene.start('levels'));
+    makeButton(this, 480, 52, 180, 32, 'المملكة', () => this.scene.start('kingdom'));
+    makeButton(this, 300, 748, 240, 42, 'العودة للمراحل', () => this.scene.start('levels'));
+
+    this.renderCards();
+    this.updateAll();
+    this.time.addEvent({ delay: 1000, loop: true, callback: () => this.tick() });
+  }
+
+  drawPlot() {
+    const g = this.add.graphics().setDepth(0);
+    g.fillStyle(0xa9def2, 1);
+    g.fillRect(0, 0, W, 100);
+    g.fillStyle(0x7cc05a, 1);
+    g.fillRect(0, 100, W, H - 100);
+    for (let i = 0; i < 90; i++) {
+      const x = hash(i * 5) * W;
+      const y = 100 + hash(i * 5 + 1) * (H - 100);
+      g.fillStyle(0x65a646, 0.5);
+      g.fillEllipse(x, y, 18 + hash(i) * 14, 8);
+    }
+  }
+
+  cardPos(i) {
+    const col = i % 2;
+    const row = Math.floor(i / 2);
+    return { x: 30 + col * 280, y: 110 + row * 118 };
+  }
+
+  busyBuilder() {
+    return CITY.some((b) => state.city[b.key].status === 'building');
+  }
+
+  renderCards() {
+    this.cardObjs.forEach((o) => o.destroy());
+    this.cardObjs = [];
+    this.cardRefs = [];
+
+    CITY.forEach((b, i) => {
+      const { x, y } = this.cardPos(i);
+      const w = 250;
+      const h = 100;
+      const st = state.city[b.key];
+      const done = st.status === 'done';
+      const building = st.status === 'building';
+
+      const bg = this.add.graphics().setDepth(5);
+      bg.fillStyle(0x3d2412, 0.35);
+      bg.fillRoundedRect(x + 3, y + 4, w, h, 14);
+      bg.fillStyle(done ? 0xd7efc0 : 0xfbeed0, 1);
+      bg.fillRoundedRect(x, y, w, h, 14);
+      bg.lineStyle(3, done ? 0x4f8a2e : 0x7a4a1e, 1);
+      bg.strokeRoundedRect(x + 1.5, y + 1.5, w - 3, h - 3, 13);
+
+      const icon = this.add.graphics({ x: x + 46, y: y + 50 }).setDepth(6);
+      if (done) {
+        drawCityBuilding(icon, b);
+      } else {
+        icon.lineStyle(2, 0x8a7a5a, 0.8);
+        icon.strokeRect(-22, -22, 44, 40);
+        icon.fillStyle(0x9a8a6a, 0.25);
+        icon.fillRect(-22, -22, 44, 40);
+        if (building) {
+          icon.lineBetween(-22, -22, 22, 18);
+          icon.lineBetween(22, -22, -22, 18);
+        }
+      }
+
+      const name = this.add.text(x + 92, y + 22, `${b.name}  (${b.days} يوم)`, {
+        fontFamily: FONT, fontSize: '16px', fontStyle: 'bold', color: '#4a2e12',
+      }).setOrigin(0, 0.5).setDepth(6);
+      const status = this.add.text(x + 92, y + 50, '', {
+        fontFamily: FONT, fontSize: '14px', color: '#6a4a2a',
+      }).setOrigin(0, 0.5).setDepth(6);
+      const bar = this.add.graphics().setDepth(6);
+
+      const hit = this.add.rectangle(x + w / 2, y + h / 2, w, h, 0x000000, 0)
+        .setDepth(8)
+        .setInteractive({ useHandCursor: true });
+      hit.on('pointerup', () => this.tryBuild(i));
+
+      this.cardObjs.push(bg, icon, name, status, bar, hit);
+      this.cardRefs[i] = { status, bar, x, y, w, h };
+    });
+  }
+
+  updateAll() {
+    const now = Date.now();
+    CITY.forEach((b, i) => {
+      const ref = this.cardRefs[i];
+      if (!ref) return;
+      const st = state.city[b.key];
+      let text;
+      let p = 0;
+      if (st.status === 'done') {
+        text = '✓ اكتمل';
+        p = 1;
+      } else if (st.status === 'building') {
+        p = Math.min(1, (now - st.startedAt) / (b.days * DAY_MS));
+        text = `يُبنى… باقي ${fmtLeft(st.endsAt - now)}`;
+      } else {
+        text = `اضغط للبناء  ·  ${b.cost} ذهب`;
+      }
+      ref.status.setText(text);
+      ref.bar.clear();
+      if (st.status === 'building') {
+        ref.bar.fillStyle(0xd9c9a3, 1);
+        ref.bar.fillRoundedRect(ref.x + 92, ref.y + 72, ref.w - 110, 8, 4);
+        ref.bar.fillStyle(0xc98a10, 1);
+        ref.bar.fillRoundedRect(ref.x + 92, ref.y + 72, Math.max(6, (ref.w - 110) * p), 8, 4);
+      }
+    });
+    const done = cityDone();
+    this.hud.setText(`الذهب ${state.gold}  ·  تقدم المدينة ${done} من ${CITY_TOTAL_DAYS} يوم`);
+  }
+
+  tick() {
+    const now = Date.now();
+    let changed = false;
+    CITY.forEach((b) => {
+      const st = state.city[b.key];
+      if (st.status === 'building' && now >= st.endsAt) {
+        st.status = 'done';
+        changed = true;
+        this.say(`اكتمل بناء ${b.name}!`);
+        beep(880, 0.15, 'sine', 0.06);
+      }
+    });
+    if (changed) {
+      saveState();
+      this.renderCards();
+    }
+    this.updateAll();
+  }
+
+  tryBuild(i) {
+    const b = CITY[i];
+    const st = state.city[b.key];
+    if (st.status === 'done') {
+      this.say(`${b.name} مكتمل أصلاً`);
+      return;
+    }
+    if (st.status === 'building') {
+      this.say(`${b.name} قيد البناء`);
+      return;
+    }
+    if (this.busyBuilder()) {
+      this.say('العامل مشغول ببناء شي ثاني، انتظر')
+      return;
+    }
+    if (state.gold < b.cost) {
+      this.say(`تحتاج ${b.cost - state.gold} ذهب زيادة`);
+      return;
+    }
+    const now = Date.now();
+    state.gold -= b.cost;
+    st.status = 'building';
+    st.startedAt = now;
+    st.endsAt = now + b.days * DAY_MS;
+    saveState();
+    this.renderCards();
+    this.updateAll();
+    this.say(`بدأ بناء ${b.name}، المدة ${b.days} يوم`);
   }
 }
 
@@ -1196,7 +1543,6 @@ class BattleScene extends Phaser.Scene {
       else this.defeat(attackers, ratio);
     });
 
-    // يمنع الضغط على الشاشة اللي تحت أثناء المعركة
     this.add.rectangle(W / 2, H / 2, W, H, 0x000000, 0).setDepth(25).setInteractive();
   }
 
@@ -1333,212 +1679,6 @@ function explode(scene, x, y, power = 1) {
   }
 }
 
-// ---------- القصر ----------
-
-class CastleScene extends Phaser.Scene {
-  constructor() {
-    super('castle');
-  }
-
-  create() {
-    this.input.topOnly = true;
-    this.castleObjs = [];
-    this.panelObjs = [];
-
-    this.drawPlot();
-    this.add.text(W / 2, 24, 'القصر', {
-      fontFamily: FONT, fontSize: '28px', fontStyle: 'bold', color: '#4a2e12',
-    }).setOrigin(0.5).setDepth(30);
-    this.hud = this.add.text(W / 2, 80, '', {
-      fontFamily: FONT, fontSize: '15px', fontStyle: 'bold', color: '#1f3a14',
-    }).setOrigin(0.5).setDepth(30);
-    this.message = this.add.text(W / 2, H - 14, '', {
-      fontFamily: FONT, fontSize: '18px', fontStyle: 'bold', color: '#ffffff',
-      stroke: '#2b4a1e', strokeThickness: 4,
-    }).setOrigin(0.5).setDepth(30);
-
-    makeButton(this, 190, 52, 150, 32, 'المراحل', () => this.scene.start('levels'));
-    makeButton(this, 410, 52, 150, 32, 'القصر', () => {}, true);
-    makeButton(this, 300, 748, 220, 42, 'رجوع للمراحل', () => this.scene.start('levels'));
-
-    this.renderCastle();
-    this.renderPanels();
-    this.updateHUD();
-  }
-
-  updateHUD() {
-    this.hud.setText(`الذهب ${state.gold}  ·  المراحل المكتملة ${state.completed} من ${LEVEL_COUNT}`);
-  }
-
-  say(text) {
-    this.message.setText(text);
-    this.time.delayedCall(2200, () => {
-      if (this.message.text === text) this.message.setText('');
-    });
-  }
-
-  drawPlot() {
-    const g = this.add.graphics().setDepth(0);
-    g.fillStyle(0xa9def2, 1);
-    g.fillRect(0, 0, W, 100);
-    g.fillStyle(0x7cc05a, 1);
-    g.fillRect(0, 100, W, H - 100);
-    for (let i = 0; i < 90; i++) {
-      const x = hash(i * 5) * W;
-      const y = 100 + hash(i * 5 + 1) * (H - 100);
-      g.fillStyle(0x65a646, 0.5);
-      g.fillEllipse(x, y, 18 + hash(i) * 14, 8);
-    }
-    g.fillStyle(0x8f5f36, 1);
-    g.fillRoundedRect(70, 330, 460, 110, 18);
-    g.fillStyle(0x9b6b3f, 1);
-    g.fillRoundedRect(78, 338, 444, 94, 14);
-  }
-
-  renderCastle() {
-    this.castleObjs.forEach((o) => o.destroy());
-    this.castleObjs = [];
-    const c = state.castle;
-    const g = this.add.graphics().setDepth(5);
-    this.castleObjs.push(g);
-    if (this.justBuilt) {
-      this.justBuilt = false;
-      g.setAlpha(0);
-      g.y = -18;
-      this.tweens.add({ targets: g, alpha: 1, y: 0, duration: 450, ease: 'Back.Out' });
-    }
-
-    if (c.foundation) {
-      g.fillStyle(0x6e6e62, 1);
-      g.fillRoundedRect(120, 362, 360, 52, 6);
-      g.fillStyle(0x8a8a7e, 1);
-      g.fillRoundedRect(124, 366, 352, 44, 5);
-      g.lineStyle(2, 0x5e5e54, 0.6);
-      [180, 240, 300, 360, 420].forEach((x) => g.lineBetween(x, 366, x, 410));
-      g.lineBetween(124, 388, 476, 388);
-    } else {
-      this.ghost(g, 120, 362, 360, 52);
-    }
-
-    if (c.walls) {
-      g.fillStyle(0x9c8a66, 1);
-      g.fillRoundedRect(150, 258, 300, 104, 4);
-      g.fillStyle(0xc9b48a, 1);
-      g.fillRoundedRect(154, 262, 292, 96, 3);
-      for (let x = 150; x < 450; x += 30) {
-        g.fillStyle(0x9c8a66, 1);
-        g.fillRect(x, 236, 16, 24);
-      }
-      g.fillStyle(0x4a2e12, 1);
-      g.fillRoundedRect(282, 300, 36, 62, 16);
-      g.fillStyle(0x7a4a22, 1);
-      g.fillRoundedRect(286, 304, 28, 58, 14);
-    } else if (c.foundation) {
-      this.ghost(g, 150, 258, 300, 104);
-    }
-
-    if (c.tower) {
-      [[118, 180], [442, 180]].forEach(([x, y]) => {
-        g.fillStyle(0x7d6c4e, 1);
-        g.fillRoundedRect(x, y, 40, 160, 4);
-        g.fillStyle(0xb5a07a, 1);
-        g.fillRoundedRect(x + 3, y + 3, 34, 154, 3);
-        g.fillStyle(0x7d6c4e, 1);
-        for (let k = 0; k < 3; k++) g.fillRect(x - 2 + k * 15, y - 14, 10, 16);
-        g.fillStyle(0x4a2e12, 1);
-        g.fillRoundedRect(x + 14, y + 40, 12, 20, 6);
-      });
-    } else if (c.walls) {
-      this.ghost(g, 118, 180, 40, 160);
-      this.ghost(g, 442, 180, 40, 160);
-    }
-
-    if (c.roof) {
-      g.fillStyle(0x7a2e2e, 1);
-      g.fillTriangle(140, 262, 460, 262, 300, 120);
-      g.fillStyle(0xa13d3d, 1);
-      g.fillTriangle(150, 258, 450, 258, 300, 128);
-      g.lineStyle(2, 0x5a1f1f, 0.6);
-      [200, 250, 300, 350, 400].forEach((x) => g.lineBetween(x, 258, 300 + (x - 300) * 0.25, 130));
-    }
-  }
-
-  ghost(g, x, y, w, h) {
-    g.lineStyle(2, 0xffffff, 0.6);
-    g.strokeRoundedRect(x, y, w, h, 6);
-    g.fillStyle(0xffffff, 0.12);
-    g.fillRoundedRect(x, y, w, h, 6);
-  }
-
-  renderPanels() {
-    this.panelObjs.forEach((o) => o.destroy());
-    this.panelObjs = [];
-
-    const pos = [{ x: 30, y: 452 }, { x: 310, y: 452 }, { x: 30, y: 584 }, { x: 310, y: 584 }];
-    CASTLE_PARTS.forEach((part, i) => {
-      const { x, y } = pos[i];
-      const w = 260;
-      const h = 116;
-      const built = state.castle[part.key];
-      const unlocked = !part.needs || state.castle[part.needs];
-
-      const g = this.add.graphics().setDepth(20);
-      g.fillStyle(0x3d2412, 0.35);
-      g.fillRoundedRect(x + 3, y + 4, w, h, 14);
-      g.fillStyle(built ? 0xd7efc0 : (unlocked ? 0xfbeed0 : 0xd9d2c2), 1);
-      g.fillRoundedRect(x, y, w, h, 14);
-      g.lineStyle(3, built ? 0x4f8a2e : 0x7a4a1e, 1);
-      g.strokeRoundedRect(x + 1.5, y + 1.5, w - 3, h - 3, 13);
-
-      const title = this.add.text(x + 16, y + 22, part.name, {
-        fontFamily: FONT, fontSize: '20px', fontStyle: 'bold', color: '#4a2e12',
-      }).setOrigin(0, 0.5).setDepth(21);
-
-      let status;
-      if (built) status = 'مبني ✓';
-      else if (!unlocked) status = `لازم تبني ${CASTLE_PARTS.find((p) => p.key === part.needs).name} أول`;
-      else status = `${part.cost} ذهب`;
-      const sub = this.add.text(x + 16, y + 60, status, {
-        fontFamily: FONT, fontSize: '16px', color: built ? '#2f5a1c' : '#6a4a2a',
-      }).setOrigin(0, 0.5).setDepth(21);
-
-      const hint = this.add.text(x + 16, y + 90, built ? '' : (unlocked ? 'اضغط للبناء' : ''), {
-        fontFamily: FONT, fontSize: '14px', color: '#7a5a3a',
-      }).setOrigin(0, 0.5).setDepth(21);
-
-      const hit = this.add.rectangle(x + w / 2, y + h / 2, w, h, 0x000000, 0)
-        .setDepth(22)
-        .setInteractive({ useHandCursor: true });
-      hit.on('pointerup', () => this.tryBuild(part));
-
-      this.panelObjs.push(g, title, sub, hint, hit);
-    });
-  }
-
-  tryBuild(part) {
-    if (state.castle[part.key]) {
-      this.say(`${part.name} مبني أصلاً`);
-      return;
-    }
-    if (part.needs && !state.castle[part.needs]) {
-      this.say(`لازم تبني ${CASTLE_PARTS.find((p) => p.key === part.needs).name} أول`);
-      return;
-    }
-    if (state.gold < part.cost) {
-      this.say(`تحتاج ${part.cost - state.gold} ذهب زيادة`);
-      return;
-    }
-    state.gold -= part.cost;
-    state.castle[part.key] = true;
-    saveState();
-    this.justBuilt = true;
-    this.renderCastle();
-    this.renderPanels();
-    this.updateHUD();
-    this.say(`تم بناء ${part.name}!`);
-  }
-}
-
 // الحالة تتحمّل قبل ما تبدأ المشاهد
 state = loadState();
 
@@ -1552,5 +1692,5 @@ new Phaser.Game({
     mode: Phaser.Scale.FIT,
     autoCenter: Phaser.Scale.CENTER_BOTH,
   },
-  scene: [LevelsScene, KingdomScene, CastleScene, BattleScene],
+  scene: [LevelsScene, KingdomScene, CityScene, BattleScene],
 });
